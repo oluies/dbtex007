@@ -1,5 +1,10 @@
 # dbt SQL Server example — Python models vs DuckDB mssql extension
 
+[![CI](https://github.com/oluies/dbtex007/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oluies/dbtex007/actions/workflows/ci.yml?query=branch%3Amain)
+[![dbt-duckdb](https://img.shields.io/badge/dbt--duckdb-%E2%89%A51.9-FF694B?logo=dbt&logoColor=white)](https://github.com/duckdb/dbt-duckdb)
+[![DuckDB](https://img.shields.io/badge/DuckDB-%E2%89%A51.4.1-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org)
+[![SQL Server](https://img.shields.io/badge/SQL%20Server-2022-CC2927?logo=microsoftsqlserver&logoColor=white)](https://hub.docker.com/_/microsoft-mssql-server)
+
 Two dbt projects that copy the same tables from one SQL Server to another,
 using different mechanisms. The point is to compare them side by side.
 
