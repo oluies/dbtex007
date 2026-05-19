@@ -9,7 +9,7 @@
 
 services:
   mssql-source:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     container_name: ddd-mssql-source
     platform: linux/amd64
     ports:
@@ -36,7 +36,7 @@ services:
       start_period: 30s
 
   mssql-dest:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     container_name: ddd-mssql-dest
     platform: linux/amd64
     ports:
