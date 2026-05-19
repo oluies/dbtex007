@@ -22,9 +22,9 @@ jobs:
       matrix:
         project: [dbt_python_copy, dbt_duckdb_mssql]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -61,16 +61,30 @@ jobs:
           - dbt_python_copy
           - dbt_duckdb_mssql
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: projects/${{ matrix.project }}/requirements.txt
 
-      - name: Materialize .env
-        run: cp .env.example .env
+      - name: Materialize .env and export into job env
+        # We don't `source .env` in subsequent steps — the ADO.NET-style
+        # connection strings contain ';' and spaces that bash would split on.
+        # Instead, copy .env.example to .env (for docker-compose) and also
+        # promote every line into $GITHUB_ENV so later steps see them as
+        # ordinary env vars.
+        run: |
+          cp .env.example .env
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            val="${val#\'}"; val="${val%\'}"
+            val="${val#\"}"; val="${val%\"}"
+            printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
+          done < .env
 
       - name: Install Python deps for ${{ matrix.project }}
         run: |
@@ -83,11 +97,12 @@ jobs:
       - name: Wait for source seed to complete
         run: |
           set -euo pipefail
-          source .env
           for i in {1..30}; do
             count=$(docker exec ddd-mssql-source /opt/mssql-tools18/bin/sqlcmd \
               -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_source -h-1 -W \
-              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.locations" 2>/dev/null | tr -d '[:space:]' || echo 0)
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.locations" 2>/dev/null \
+              | tr -d '[:space:]' || true)
+            count="${count:-0}"
             if [[ "$count" == "10" ]]; then
               echo "Source seeded ($count locations)."
               exit 0
@@ -105,15 +120,12 @@ jobs:
       - name: Run dbt project
         env:
           DBT_PROFILES_DIR: "."
-        run: |
-          set -a; source .env; set +a
-          cd projects/${{ matrix.project }}
-          dbt run
+        working-directory: projects/${{ matrix.project }}
+        run: dbt run
 
       - name: Assert dest row counts match source
         run: |
           set -euo pipefail
-          source .env
           tables=(locations voyages cargo itinerary legs handling_events)
           fail=0
           for t in "${tables[@]}"; do
