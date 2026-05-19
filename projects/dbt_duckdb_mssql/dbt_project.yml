@@ -1,0 +1,26 @@
+name: 'dbt_duckdb_mssql'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dbt_duckdb_mssql'
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+seed-paths:  ["seeds"]
+snapshot-paths: ["snapshots"]
+test-paths:  ["tests"]
+analysis-paths: ["analyses"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# Every model copies one DDD table from source SQL Server to destination SQL
+# Server using the `mssql` community DuckDB extension. The custom
+# `mssql_native` materialization in macros/ handles INSTALL/LOAD/ATTACH and
+# pushes a CREATE OR REPLACE TABLE across the attachment boundary.
+models:
+  dbt_duckdb_mssql:
+    +materialized: mssql_native
+    +target_mssql_schema: ddd
+    +strategy: replace

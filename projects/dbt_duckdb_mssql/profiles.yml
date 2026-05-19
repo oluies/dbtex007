@@ -1,0 +1,24 @@
+dbt_duckdb_mssql:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: 'work.duckdb'
+      threads: 1
+      # Cross-catalog writes via the mssql extension don't participate in
+      # DuckDB's own transactions, and dbt-duckdb's default BEGIN/COMMIT
+      # wrapping interferes with how the extension manages its TDS session.
+      # Disabling lets the extension commit naturally per statement.
+      disable_transactions: true
+      # Memory controls — see https://duckdb.org/docs/current/guides/performance/oom
+      # The mssql extension streams rows from SQL Server into DuckDB before
+      # pushing them back out; without a limit DuckDB will grab 80% of RAM
+      # and surprise users on smaller machines. preserve_insertion_order=false
+      # is recommended for large reads/writes; spill goes to target/ so
+      # `make clean` clears it.
+      settings:
+        memory_limit: "{{ env_var('DUCKDB_MEMORY_LIMIT', '512MB') }}"
+        threads: "{{ env_var('DUCKDB_THREADS', '4') }}"
+        preserve_insertion_order: false
+        temp_directory: 'target/duckdb_spill'
+        max_temp_directory_size: "{{ env_var('DUCKDB_MAX_SPILL', '10GB') }}"

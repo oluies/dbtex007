@@ -1,0 +1,20 @@
+name: 'dbt_python_copy'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dbt_python_copy'
+
+model-paths:   ["models"]
+macro-paths:   ["macros"]
+seed-paths:    ["seeds"]
+snapshot-paths: ["snapshots"]
+test-paths:    ["tests"]
+analysis-paths: ["analyses"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  dbt_python_copy:
+    +materialized: table

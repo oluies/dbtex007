@@ -1,0 +1,15 @@
+version: 2
+
+sources:
+  - name: ddd_source
+    description: >
+      The source SQL Server database (ddd_source). These tables are not read
+      via dbt's ref/source — they are queried directly inside each Python
+      model via SQLAlchemy. Declared here for documentation only.
+    tables:
+      - name: locations
+      - name: voyages
+      - name: cargo
+      - name: itinerary
+      - name: legs
+      - name: handling_events

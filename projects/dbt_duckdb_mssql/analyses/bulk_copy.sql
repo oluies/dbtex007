@@ -1,0 +1,22 @@
+-- Reference: the one-shot alternative to running every model in this project.
+--
+-- DuckDB's multi-database support (https://duckdb.org/2024/01/26/multi-database-support-in-duckdb)
+-- exposes `COPY FROM DATABASE ... TO` which clones every table from one
+-- attached database to another in a single statement.
+--
+-- `dbt compile -s bulk_copy` will render this; `dbt run-operation` won't
+-- execute it because it's an analysis, not a model. Run it manually with:
+--
+--   duckdb -c "
+--     INSTALL mssql FROM community;
+--     LOAD mssql;
+--     ATTACH '${SRC_MSSQL_DUCKDB_CONN}' AS src (TYPE mssql, READ_ONLY);
+--     ATTACH '${DST_MSSQL_DUCKDB_CONN}' AS dst (TYPE mssql);
+--     COPY FROM DATABASE src TO dst;
+--   "
+--
+-- We don't wire this into dbt because it would collapse to a single
+-- opaque node with no per-table lineage, defeating the point of using
+-- dbt over a shell script.
+
+COPY FROM DATABASE src TO dst

@@ -1,0 +1,19 @@
+dbt_python_copy:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: 'audit.duckdb'
+      threads: 1
+      # Memory controls — see https://duckdb.org/docs/current/guides/performance/oom
+      # DuckDB defaults to 80% of system RAM; cap it explicitly so a runaway
+      # Python model (e.g. reading a huge SQL Server table into a DataFrame)
+      # doesn't trip the OOM killer. preserve_insertion_order=false reduces
+      # buffer pressure when materializing wide results. temp_directory points
+      # spills at the project target/ so they're gitignored and easy to clear.
+      settings:
+        memory_limit: "{{ env_var('DUCKDB_MEMORY_LIMIT', '512MB') }}"
+        threads: "{{ env_var('DUCKDB_THREADS', '4') }}"
+        preserve_insertion_order: false
+        temp_directory: 'target/duckdb_spill'
+        max_temp_directory_size: "{{ env_var('DUCKDB_MAX_SPILL', '10GB') }}"
