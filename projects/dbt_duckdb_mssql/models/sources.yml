@@ -4,11 +4,12 @@ sources:
   - name: src_ddd
     database: src        # matches the ATTACH alias set in the mssql_native materialization
     schema: ddd
-    description: >
+    description: |
       Tables in the source SQL Server database, exposed via the mssql
       community extension. The ATTACH happens inside the mssql_native
-      materialization; referencing these via {{ source(...) }} compiles
-      to `src.ddd.<table>` three-part names which DuckDB routes through TDS.
+      materialization; referencing these via the dbt `source()` jinja
+      function compiles to `src.ddd.<table>` three-part names which
+      DuckDB routes through TDS.
     tables:
       - name: locations
       - name: voyages
