@@ -1,9 +1,10 @@
 # dbt SQL Server example — Python models vs DuckDB mssql extension
 
 [![CI](https://github.com/oluies/dbtex007/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oluies/dbtex007/actions/workflows/ci.yml?query=branch%3Amain)
-[![dbt-duckdb](https://img.shields.io/badge/dbt--duckdb-%E2%89%A51.9-FF694B?logo=dbt&logoColor=white)](https://github.com/duckdb/dbt-duckdb)
-[![DuckDB](https://img.shields.io/badge/DuckDB-%E2%89%A51.4.1-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org)
-[![SQL Server](https://img.shields.io/badge/SQL%20Server-2022-CC2927?logo=microsoftsqlserver&logoColor=white)](https://hub.docker.com/_/microsoft-mssql-server)
+[![dbt-duckdb](https://img.shields.io/badge/dbt--duckdb-%E2%89%A51.10.1-FF694B?logo=dbt&logoColor=white)](https://github.com/duckdb/dbt-duckdb)
+[![DuckDB](https://img.shields.io/badge/DuckDB-%E2%89%A51.5.2-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org)
+[![mssql extension](https://img.shields.io/badge/mssql%20extension-hugr--lab-181717?logo=github&logoColor=white)](https://github.com/hugr-lab/mssql-extension)
+[![SQL Server](https://img.shields.io/badge/SQL%20Server-2025--latest-CC2927?logo=microsoftsqlserver&logoColor=white)](https://hub.docker.com/_/microsoft-mssql-server)
 
 Two dbt projects that copy the same tables from one SQL Server to another,
 using different mechanisms. The point is to compare them side by side.
@@ -26,7 +27,7 @@ sample (per [oluies/ddd-sample-scala](https://github.com/oluies/ddd-sample-scala
 
 ```
 .
-├── docker-compose.yml          # two SQL Server 2022 containers (source + dest)
+├── docker-compose.yml          # two SQL Server 2025 containers (source + dest)
 ├── docker/mssql-init/
 │   ├── entrypoint.sh           # Microsoft's "background sqlservr + poll + run *.sql" pattern
 │   ├── source/01_schema.sql
@@ -43,7 +44,7 @@ sample (per [oluies/ddd-sample-scala](https://github.com/oluies/ddd-sample-scala
 ## Prerequisites
 
 - Docker Desktop (or Colima) — on Apple Silicon the official
-  `mcr.microsoft.com/mssql/server:2022-latest` image runs under Rosetta
+  `mcr.microsoft.com/mssql/server:2025-latest` image runs under Rosetta
   emulation. Slow first start but works. See **ARM Macs** below for the
   faster `azure-sql-edge` alternative.
 - Python 3.10+ on the host (used by both dbt projects).
