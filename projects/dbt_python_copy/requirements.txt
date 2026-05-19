@@ -1,5 +1,5 @@
 dbt-duckdb>=1.9,<2.0
 duckdb>=1.4.1
-pandas>=2.2
-sqlalchemy>=2.0
-pymssql>=2.3
+pandas>=3.0.3
+sqlalchemy>=2.0.49
+pymssql>=2.3.13
