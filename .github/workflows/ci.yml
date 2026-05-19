@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast lint — just compiles both dbt projects against a temp DuckDB target.
+  # No SQL Server needed: env vars are stubbed and the mssql_native
+  # materialization defers env_var() lookups until run-time.
+  lint:
+    name: dbt parse
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [dbt_python_copy, dbt_duckdb_mssql]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: projects/${{ matrix.project }}/requirements.txt
+
+      - name: Install project deps
+        working-directory: projects/${{ matrix.project }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: dbt parse
+        working-directory: projects/${{ matrix.project }}
+        env:
+          DBT_PROFILES_DIR: "."
+          # Stubs satisfy env_var() evaluations during parse if any leak through.
+          SRC_MSSQL_URL: mssql+pymssql://sa:stub@localhost:11433/ddd_source
+          DST_MSSQL_URL: mssql+pymssql://sa:stub@localhost:21433/ddd_dest
+          SRC_MSSQL_DUCKDB_CONN: "Server=localhost,11433;Database=ddd_source;User Id=sa;Password=stub;TrustServerCertificate=true"
+          DST_MSSQL_DUCKDB_CONN: "Server=localhost,21433;Database=ddd_dest;User Id=sa;Password=stub;TrustServerCertificate=true"
+          MSSQL_SA_PASSWORD: stub
+        run: dbt parse
+
+  # Full end-to-end: bring up both SQL Servers, run each project against
+  # a fresh seed, assert source and dest row counts match.
+  integration:
+    name: end-to-end (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - dbt_python_copy
+          - dbt_duckdb_mssql
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: projects/${{ matrix.project }}/requirements.txt
+
+      - name: Materialize .env
+        run: cp .env.example .env
+
+      - name: Install Python deps for ${{ matrix.project }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r projects/${{ matrix.project }}/requirements.txt
+
+      - name: Start SQL Server containers
+        run: docker compose up -d --wait
+
+      - name: Wait for source seed to complete
+        run: |
+          set -euo pipefail
+          source .env
+          for i in {1..30}; do
+            count=$(docker exec ddd-mssql-source /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_source -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.locations" 2>/dev/null | tr -d '[:space:]' || echo 0)
+            if [[ "$count" == "10" ]]; then
+              echo "Source seeded ($count locations)."
+              exit 0
+            fi
+            echo "  attempt $i: locations=$count, waiting..."
+            sleep 2
+          done
+          echo "::error::Source seed did not complete in time"
+          docker compose logs mssql-source | tail -100
+          exit 1
+
+      - name: Show source row counts
+        run: make seed-check
+
+      - name: Run dbt project
+        env:
+          DBT_PROFILES_DIR: "."
+        run: |
+          set -a; source .env; set +a
+          cd projects/${{ matrix.project }}
+          dbt run
+
+      - name: Assert dest row counts match source
+        run: |
+          set -euo pipefail
+          source .env
+          tables=(locations voyages cargo itinerary legs handling_events)
+          fail=0
+          for t in "${tables[@]}"; do
+            src=$(docker exec ddd-mssql-source /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_source -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.$t" | tr -d '[:space:]')
+            dst=$(docker exec ddd-mssql-dest /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_dest -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.$t" | tr -d '[:space:]')
+            if [[ "$src" != "$dst" ]]; then
+              echo "::error::$t: src=$src dst=$dst (mismatch)"
+              fail=1
+            else
+              echo "  $t: $src rows (ok)"
+            fi
+          done
+          exit $fail
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker compose logs --tail=200 mssql-source || true
+          docker compose logs --tail=200 mssql-dest || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

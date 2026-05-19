@@ -1,0 +1,47 @@
+version: 2
+
+# Dependabot does NOT have a native ecosystem for dbt's packages.yml. If you
+# add hub.getdbt.com packages later and want bumps, switch to Renovate with
+# a custom regex manager — see https://docs.renovatebot.com/modules/manager/regex/.
+# For now both dbt projects only declare adapters via requirements.txt, which
+# pip handles fine.
+
+updates:
+  - package-ecosystem: pip
+    directory: /projects/dbt_python_copy
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dbt:
+        patterns:
+          - "dbt-*"
+          - "duckdb"
+      python-data:
+        patterns:
+          - "pandas"
+          - "sqlalchemy"
+          - "pymssql"
+
+  - package-ecosystem: pip
+    directory: /projects/dbt_duckdb_mssql
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dbt:
+        patterns:
+          - "dbt-*"
+          - "duckdb"
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

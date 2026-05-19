@@ -221,6 +221,29 @@ DUCKDB_MEMORY_LIMIT=12GB DUCKDB_THREADS=8 make run-duckdb
   true` should already be set in `projects/dbt_duckdb_mssql/profiles.yml`;
   check it wasn't overridden by `~/.dbt/profiles.yml`.
 
+## CI & dependency updates
+
+`.github/workflows/ci.yml` runs on every push and PR:
+
+1. **`lint`** — matrix over both projects. Installs `requirements.txt`,
+   runs `dbt parse`. No SQL Server needed; env_var lookups are stubbed.
+2. **`integration`** — matrix over both projects. `docker compose up
+   --wait`, waits for seed completion, runs `dbt run`, then asserts
+   each destination table's row count equals the source. Logs are
+   dumped on failure.
+
+`.github/dependabot.yml` watches:
+
+- `pip` in each `projects/*/requirements.txt` (grouped: dbt adapters
+  together, pandas/sqlalchemy/pymssql together).
+- `docker-compose` at the repo root for the `mcr.microsoft.com/mssql/server`
+  image tag.
+- `github-actions` for the workflow itself.
+
+There is no Dependabot ecosystem for dbt's `packages.yml` — neither
+project uses dbt-hub packages today, so it's a non-issue. If you add any
+later, switch to [Renovate with a custom regex manager](https://docs.renovatebot.com/modules/manager/regex/).
+
 ## What's out of scope
 
 - dbt tests / snapshots / freshness — meaningful for Project A,
