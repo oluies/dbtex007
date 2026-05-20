@@ -15,10 +15,23 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Opt in to the v1.10+ "test arguments" parser so values under a test's
+# `arguments:` block are passed as kwargs. We don't have any tests with
+# arguments today; setting this now keeps the project forward-compatible
+# without changing behaviour. Suggested by `uvx dbt-autofix deprecations`.
+flags:
+  require_generic_test_arguments_property: true
+
 # Every model copies one DDD table from source SQL Server to destination SQL
 # Server using the `mssql` community DuckDB extension. The custom
 # `mssql_native` materialization in macros/ handles INSTALL/LOAD/ATTACH and
 # pushes a CREATE OR REPLACE TABLE across the attachment boundary.
+#
+# NOTE: dbt-autofix flags +target_mssql_schema and +strategy as "unrecognized
+# config" and would move them under +meta. We keep them at top-level because
+# the custom mssql_native materialization reads them via
+# config.get('target_mssql_schema') / config.get('strategy') — moving them
+# under meta would silently fall back to defaults instead of raising.
 models:
   dbt_duckdb_mssql:
     +materialized: mssql_native
