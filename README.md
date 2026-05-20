@@ -285,11 +285,20 @@ changed something we depend on"; not "this PR is broken."
 
 ### Weekly leak check
 
-`.github/workflows/nightly-mssql-leak-check.yml` runs the same smoke
-SQL through the same upstream-HEAD `duckdb-cli + mssql extension`
-pair but under [`valgrind --tool=memcheck --leak-check=full`](https://valgrind.org/docs/manual/mc-manual.html).
-Cadence is weekly (Mondays 05:00 UTC) — valgrind adds 30–60s per run
-and leak trends move slowly, so daily would mostly burn minutes.
+`.github/workflows/nightly-mssql-leak-check.yml` exercises the same
+upstream-HEAD `duckdb-cli + mssql extension` pair under
+[`valgrind --tool=memcheck --leak-check=full`](https://valgrind.org/docs/manual/mc-manual.html),
+but instead of running the canary's six-table copy once, it loops the
+**`ATTACH` → `DETACH`** cycle `LEAK_ITERATIONS` times (default **10**,
+giving 20 TLS handshakes per run) to amplify any per-connection leak
+above the steady-state OpenSSL/TLS init noise. Empirically each
+src+dst iteration takes ~5 min under valgrind (the TLS handshake
+dominates and is expensive under memcheck), so 10 iters fits the
+60-minute job budget. Override `LEAK_ITERATIONS` via repository
+variable if a specific regression needs more amplification. Cadence is weekly (Mondays 05:00 UTC) — valgrind adds a
+minute or two and leak trends move slowly, so daily would mostly burn
+minutes. Override the iteration count by setting the
+[`LEAK_ITERATIONS` repository variable](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows).
 
 What the workflow produces:
 
