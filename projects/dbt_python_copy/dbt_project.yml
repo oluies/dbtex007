@@ -15,6 +15,13 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+# Opt in to the v1.10+ "test arguments" parser so values under a test's
+# `arguments:` block are passed as kwargs. We don't have any tests with
+# arguments today; setting this now keeps the project forward-compatible
+# without changing behaviour. Suggested by `uvx dbt-autofix deprecations`.
+flags:
+  require_generic_test_arguments_property: true
+
 models:
   dbt_python_copy:
     +materialized: table
