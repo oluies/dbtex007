@@ -1,9 +1,18 @@
 name: nightly · mssql ext canary
 
-# Runs the dbt_duckdb_mssql end-to-end suite against the latest *unreleased*
-# build of the hugr-lab/mssql-extension — i.e. whatever the upstream CI
-# produced on its most recent main-branch run. Goal: catch upstream
-# regressions early, before they land in a community release.
+# Runs the dbt_duckdb_mssql end-to-end suite against the **latest tagged
+# release** of hugr-lab/mssql-extension — *before* that tag is picked up
+# by the DuckDB community-extensions repo (typically a several-day lag).
+# Catches regressions in a release that `INSTALL mssql FROM community`
+# is about to start serving to everyone.
+#
+# Why not literal upstream HEAD? DuckDB extensions are ABI-pinned to the
+# exact DuckDB SHA they were built against. Upstream CI artifacts are
+# built against DuckDB's dev branch (some commit SHA), which won't load
+# into a released DuckDB. Tagged releases declare the DuckDB version
+# they target (see release notes), so they're loadable. Building from
+# source against our pinned DuckDB would let us test literal HEAD but
+# adds ~10 min of CMake build time.
 #
 # Triggers:
 # - daily at 04:00 UTC
@@ -32,9 +41,9 @@ permissions:
 jobs:
   canary:
     # NOT marked as required in branch protection. Failures here are
-    # informational — they indicate the upstream extension regressed
-    # or our integration assumes something that's about to change.
-    name: end-to-end (dbt_duckdb_mssql · upstream HEAD)
+    # informational — they indicate the upstream extension's latest
+    # release breaks our integration before it reaches `INSTALL ... FROM community`.
+    name: end-to-end (dbt_duckdb_mssql · latest upstream release)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -61,37 +70,35 @@ jobs:
             printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
           done < .env
 
-      - name: Resolve and download latest hugr-lab mssql-extension build
+      - name: Resolve and download latest hugr-lab mssql-extension release
         id: ext
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/mssql-ext
-          # Latest successful CI run on hugr-lab/mssql-extension main.
-          read -r run_id run_sha run_url < <(
-            gh api 'repos/hugr-lab/mssql-extension/actions/runs?branch=main&status=success&per_page=20' \
-              --jq '[.workflow_runs[] | select(.name == "CI")] | .[0] | "\(.id) \(.head_sha[0:7]) \(.html_url)"'
+          # Latest non-prerelease tag on hugr-lab/mssql-extension. Excludes the
+          # asset-less v0.1.0 placeholder and any draft/prerelease entries.
+          read -r tag release_url < <(
+            gh api 'repos/hugr-lab/mssql-extension/releases?per_page=20' \
+              --jq '[.[] | select(.draft == false and .prerelease == false and (.assets | length) > 0)] | .[0] | "\(.tag_name) \(.html_url)"'
           )
-          echo "Upstream run: $run_url (sha $run_sha)"
-          gh run download "$run_id" --repo hugr-lab/mssql-extension \
-            --name mssql-extension-linux_amd64 --dir /tmp/mssql-ext
-          ext_path=$(find /tmp/mssql-ext -name '*.duckdb_extension' -print -quit)
+          echo "Resolving release: $tag ($release_url)"
+          gh release download "$tag" --repo hugr-lab/mssql-extension \
+            --pattern '*-linux_amd64.duckdb_extension' --dir /tmp/mssql-ext
+          ext_path=$(find /tmp/mssql-ext -name '*-linux_amd64.duckdb_extension' -print -quit)
           if [[ -z "$ext_path" ]]; then
-            echo "::error::No .duckdb_extension binary in artifact"
+            echo "::error::No linux_amd64 .duckdb_extension asset on $tag"
             ls -la /tmp/mssql-ext
             exit 1
           fi
           echo "MSSQL_EXT_LOCAL_PATH=$ext_path" >> "$GITHUB_ENV"
-          echo "upstream_sha=$run_sha"     >> "$GITHUB_OUTPUT"
-          echo "upstream_run_url=$run_url" >> "$GITHUB_OUTPUT"
-          # Surface in the job summary so the run page tells you which
-          # upstream commit this canary tested.
+          echo "upstream_tag=$tag"           >> "$GITHUB_OUTPUT"
+          echo "upstream_release_url=$release_url" >> "$GITHUB_OUTPUT"
           {
             echo "### Canary build under test"
             echo "- Upstream repo: [hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension)"
-            echo "- Upstream commit: \`$run_sha\`"
-            echo "- Upstream CI run: $run_url"
+            echo "- Upstream release: [\`$tag\`]($release_url)"
             echo "- Local binary: \`$ext_path\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -121,7 +128,7 @@ jobs:
           docker compose logs mssql-source | tail -100
           exit 1
 
-      - name: Run dbt project against unreleased extension
+      - name: Run dbt project against latest release
         env:
           DBT_PROFILES_DIR: "."
         working-directory: projects/dbt_duckdb_mssql
@@ -140,7 +147,7 @@ jobs:
               -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_dest -h-1 -W \
               -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.$t" | tr -d '[:space:]')
             if [[ "$src" != "$dst" ]]; then
-              echo "::error::$t: src=$src dst=$dst (mismatch — upstream HEAD ${UPSTREAM_SHA} may have regressed)"
+              echo "::error::$t: src=$src dst=$dst (mismatch — upstream release ${UPSTREAM_TAG} may have regressed)"
               fail=1
             else
               echo "  $t: $src rows (ok)"
@@ -148,7 +155,7 @@ jobs:
           done
           exit $fail
         env:
-          UPSTREAM_SHA: ${{ steps.ext.outputs.upstream_sha }}
+          UPSTREAM_TAG: ${{ steps.ext.outputs.upstream_tag }}
 
       - name: Dump container logs on failure
         if: failure()

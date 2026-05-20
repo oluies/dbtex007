@@ -254,19 +254,27 @@ later, switch to [Renovate with a custom regex manager](https://docs.renovatebot
 ### Upstream-canary: nightly mssql-extension build
 
 `.github/workflows/nightly-mssql-ext.yml` runs the `dbt_duckdb_mssql`
-end-to-end suite once a day against the **latest unreleased**
-[hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension)
-binary. It pulls the artifact from upstream's most recent successful
-main-branch CI run, side-loads it via the `MSSQL_EXT_LOCAL_PATH` env
-var (the materialization branches to `LOAD '<path>'` instead of
-`INSTALL ... FROM community`), and reports the upstream SHA in the run
+end-to-end suite once a day against the **latest tagged release** of
+[hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension),
+side-loading the binary via the `MSSQL_EXT_LOCAL_PATH` env var (the
+materialization branches to `LOAD '<path>'` instead of
+`INSTALL ... FROM community`). The upstream tag is reported in the run
 summary.
 
-This job is **not** a required check — when it fails, the signal is
-"upstream HEAD changed something we depend on", not "this PR is
-broken." It also fires on PRs that touch the materialization or the
-workflow itself so changes to the side-loading mechanism get verified
-before merging.
+Why "latest tagged release" and not literal upstream HEAD? DuckDB
+extensions are ABI-pinned to the exact DuckDB SHA they were built
+against. Upstream CI artifacts target DuckDB's dev branch — they can't
+load into our released DuckDB. Tagged releases declare the DuckDB
+version they target, so they load cleanly. The DuckDB
+community-extensions repo lags upstream releases by several days, so
+this canary catches a tag-but-not-yet-published regression before it
+reaches everyone via `INSTALL ... FROM community`.
+
+This job is **not** a required check. A red badge means "upstream's
+latest release breaks our integration before it hits community"; not
+"this PR is broken." The canary also fires on PRs that touch the
+materialization or the workflow itself so changes to the side-loading
+mechanism get verified before merging.
 
 ## What's out of scope
 
