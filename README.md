@@ -1,6 +1,7 @@
 # dbt SQL Server example — Python models vs DuckDB mssql extension
 
 [![CI](https://github.com/oluies/dbtex007/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oluies/dbtex007/actions/workflows/ci.yml?query=branch%3Amain)
+[![nightly · mssql ext canary](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-ext.yml/badge.svg)](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-ext.yml)
 [![dbt-duckdb](https://img.shields.io/badge/dbt--duckdb-%E2%89%A51.10.1-FF694B?logo=dbt&logoColor=white)](https://github.com/duckdb/dbt-duckdb)
 [![DuckDB](https://img.shields.io/badge/DuckDB-%E2%89%A51.5.2-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org)
 [![mssql extension](https://img.shields.io/badge/mssql%20extension-hugr--lab-181717?logo=github&logoColor=white)](https://github.com/hugr-lab/mssql-extension)
@@ -249,6 +250,23 @@ DUCKDB_MEMORY_LIMIT=12GB DUCKDB_THREADS=8 make run-duckdb
 There is no Dependabot ecosystem for dbt's `packages.yml` — neither
 project uses dbt-hub packages today, so it's a non-issue. If you add any
 later, switch to [Renovate with a custom regex manager](https://docs.renovatebot.com/modules/manager/regex/).
+
+### Upstream-canary: nightly mssql-extension build
+
+`.github/workflows/nightly-mssql-ext.yml` runs the `dbt_duckdb_mssql`
+end-to-end suite once a day against the **latest unreleased**
+[hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension)
+binary. It pulls the artifact from upstream's most recent successful
+main-branch CI run, side-loads it via the `MSSQL_EXT_LOCAL_PATH` env
+var (the materialization branches to `LOAD '<path>'` instead of
+`INSTALL ... FROM community`), and reports the upstream SHA in the run
+summary.
+
+This job is **not** a required check — when it fails, the signal is
+"upstream HEAD changed something we depend on", not "this PR is
+broken." It also fires on PRs that touch the materialization or the
+workflow itself so changes to the side-loading mechanism get verified
+before merging.
 
 ## What's out of scope
 

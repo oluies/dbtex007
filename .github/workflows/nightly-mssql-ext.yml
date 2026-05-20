@@ -1,0 +1,157 @@
+name: nightly · mssql ext canary
+
+# Runs the dbt_duckdb_mssql end-to-end suite against the latest *unreleased*
+# build of the hugr-lab/mssql-extension — i.e. whatever the upstream CI
+# produced on its most recent main-branch run. Goal: catch upstream
+# regressions early, before they land in a community release.
+#
+# Triggers:
+# - daily at 04:00 UTC
+# - manual via the Actions tab
+# - on PRs that touch the materialization or this workflow itself, so
+#   changes to the side-loading mechanism are verified before merging
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/nightly-mssql-ext.yml"
+      - "projects/dbt_duckdb_mssql/macros/materialization_mssql_native.sql"
+      - "projects/dbt_duckdb_mssql/profiles.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Required so gh run download can pull artifacts from hugr-lab's public repo.
+  actions: read
+
+jobs:
+  canary:
+    # NOT marked as required in branch protection. Failures here are
+    # informational — they indicate the upstream extension regressed
+    # or our integration assumes something that's about to change.
+    name: end-to-end (dbt_duckdb_mssql · upstream HEAD)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: projects/dbt_duckdb_mssql/requirements.txt
+
+      - name: Materialize .env and export into job env
+        run: |
+          cp .env.example .env
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            val="${val#\'}"; val="${val%\'}"
+            val="${val#\"}"; val="${val%\"}"
+            printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
+          done < .env
+
+      - name: Resolve and download latest hugr-lab mssql-extension build
+        id: ext
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mssql-ext
+          # Latest successful CI run on hugr-lab/mssql-extension main.
+          read -r run_id run_sha run_url < <(
+            gh api 'repos/hugr-lab/mssql-extension/actions/runs?branch=main&status=success&per_page=20' \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | .[0] | "\(.id) \(.head_sha[0:7]) \(.html_url)"'
+          )
+          echo "Upstream run: $run_url (sha $run_sha)"
+          gh run download "$run_id" --repo hugr-lab/mssql-extension \
+            --name mssql-extension-linux_amd64 --dir /tmp/mssql-ext
+          ext_path=$(find /tmp/mssql-ext -name '*.duckdb_extension' -print -quit)
+          if [[ -z "$ext_path" ]]; then
+            echo "::error::No .duckdb_extension binary in artifact"
+            ls -la /tmp/mssql-ext
+            exit 1
+          fi
+          echo "MSSQL_EXT_LOCAL_PATH=$ext_path" >> "$GITHUB_ENV"
+          echo "upstream_sha=$run_sha"     >> "$GITHUB_OUTPUT"
+          echo "upstream_run_url=$run_url" >> "$GITHUB_OUTPUT"
+          # Surface in the job summary so the run page tells you which
+          # upstream commit this canary tested.
+          {
+            echo "### Canary build under test"
+            echo "- Upstream repo: [hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension)"
+            echo "- Upstream commit: \`$run_sha\`"
+            echo "- Upstream CI run: $run_url"
+            echo "- Local binary: \`$ext_path\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install Python deps for dbt_duckdb_mssql
+        run: uv pip install --system -r projects/dbt_duckdb_mssql/requirements.txt
+
+      - name: Start SQL Server containers
+        run: docker compose up -d --wait
+
+      - name: Wait for source seed to complete
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            count=$(docker exec ddd-mssql-source /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_source -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.locations" 2>/dev/null \
+              | tr -d '[:space:]' || true)
+            count="${count:-0}"
+            if [[ "$count" == "10" ]]; then
+              echo "Source seeded ($count locations)."
+              exit 0
+            fi
+            echo "  attempt $i: locations=$count, waiting..."
+            sleep 2
+          done
+          echo "::error::Source seed did not complete in time"
+          docker compose logs mssql-source | tail -100
+          exit 1
+
+      - name: Run dbt project against unreleased extension
+        env:
+          DBT_PROFILES_DIR: "."
+        working-directory: projects/dbt_duckdb_mssql
+        run: dbt run
+
+      - name: Assert dest row counts match source
+        run: |
+          set -euo pipefail
+          tables=(locations voyages cargo itinerary legs handling_events)
+          fail=0
+          for t in "${tables[@]}"; do
+            src=$(docker exec ddd-mssql-source /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_source -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.$t" | tr -d '[:space:]')
+            dst=$(docker exec ddd-mssql-dest /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_dest -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.$t" | tr -d '[:space:]')
+            if [[ "$src" != "$dst" ]]; then
+              echo "::error::$t: src=$src dst=$dst (mismatch — upstream HEAD ${UPSTREAM_SHA} may have regressed)"
+              fail=1
+            else
+              echo "  $t: $src rows (ok)"
+            fi
+          done
+          exit $fail
+        env:
+          UPSTREAM_SHA: ${{ steps.ext.outputs.upstream_sha }}
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker compose logs --tail=200 mssql-source || true
+          docker compose logs --tail=200 mssql-dest || true
