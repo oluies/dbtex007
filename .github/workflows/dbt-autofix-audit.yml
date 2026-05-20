@@ -54,13 +54,27 @@ jobs:
         # output so the artifact reads cleanly and the workflow summary
         # renders properly. Exit 0 always so a flagged deprecation is
         # informational, not a hard failure.
+        #
+        # COLUMNS=200 + NO_COLOR=1 stop Typer/Rich from wrapping long
+        # paths across lines, which lets the filter below match each
+        # "Warning: Path … does not exist" message on a single line.
+        # We strip those: dbt-autofix scans every default project dir
+        # (seeds, snapshots, tests, analyses, …) and warns about any
+        # that don't exist on disk. Our projects don't use most of
+        # them, so the warnings are pure noise.
+        env:
+          COLUMNS: "200"
+          NO_COLOR: "1"
         run: |
           set -uo pipefail
           mkdir -p "${GITHUB_WORKSPACE}/audit"
           log="${GITHUB_WORKSPACE}/audit/${{ matrix.project }}.log"
           uvx dbt-autofix deprecations --dry-run 2>&1 \
             | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' \
+            | grep -vE '^Warning: Path .* does not exist$' \
             | tee "$log"
+          # grep returning 1 (no matches) is fine; |& tee swallows it.
+          true
 
       - name: Render summary
         if: always()
