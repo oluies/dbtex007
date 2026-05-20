@@ -12,13 +12,16 @@ name: nightly · mssql ext leak check
 # allocations until process exit, so "still reachable" bytes are not
 # bugs; watch "definitely lost" / "indirectly lost" for regressions.
 #
-# Weekly cadence (Mondays 05:00 UTC) rather than daily — valgrind adds
-# 30–60s per run and leak trends move slowly. Daily would mostly burn
-# minutes for redundant data.
+# Manual-trigger only — run via the Actions UI or:
+#   gh workflow run nightly-mssql-leak-check.yml --ref main
+# Triggered also on PRs that touch this file so changes are verified
+# before merging.
 
 on:
-  schedule:
-    - cron: "0 5 * * 1"
+  # Manual-only: valgrind runs are expensive (~60-min budget) and pull
+  # from an external repo's artifacts, so we'd rather opt in explicitly
+  # than burn minutes on every cron. Also kept on PRs that touch this
+  # workflow file so changes are verified before merging.
   workflow_dispatch:
   pull_request:
     paths:

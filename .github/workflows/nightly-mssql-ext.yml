@@ -14,8 +14,10 @@ name: nightly · mssql ext canary
 # `end-to-end (dbt_duckdb_mssql)` job in ci.yml covers that path against
 # the community-released extension.
 on:
-  schedule:
-    - cron: "0 4 * * *"
+  # Manual-only: this canary touches an external public repo (downloads
+  # artifacts from hugr-lab/mssql-extension's CI), so we'd rather opt in
+  # explicitly than burn minutes on every cron. Also kept on PRs that
+  # touch this workflow file so changes are verified before merging.
   workflow_dispatch:
   pull_request:
     paths:
