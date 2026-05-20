@@ -120,13 +120,14 @@ jobs:
 
       - name: Smoke SQL via upstream duckdb-cli
         # Mirrors the materialization's hot path: LOAD extension, ATTACH
-        # both DBs, CREATE OR REPLACE TABLE across the boundary, count.
-        # Runs against the DDD tables our regular suite uses so any
-        # type-mapping / TDS regression surfaces here.
+        # both DBs, CREATE OR REPLACE TABLE across the boundary. Runs
+        # against the DDD tables our regular suite uses so any
+        # type-mapping / TDS regression surfaces here. The -unsigned
+        # flag is the only way to allow unsigned extensions — it's a
+        # startup config, can't be SET after the database opens.
         run: |
           set -euo pipefail
-          "$DUCKDB_BIN" :memory: <<SQL
-          SET allow_unsigned_extensions = true;
+          "$DUCKDB_BIN" -unsigned :memory: <<SQL
           LOAD '${MSSQL_EXT_PATH}';
           ATTACH '${SRC_MSSQL_DUCKDB_CONN}' AS src (TYPE mssql, READ_ONLY);
           ATTACH '${DST_MSSQL_DUCKDB_CONN}' AS dst (TYPE mssql);
