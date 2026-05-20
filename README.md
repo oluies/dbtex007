@@ -258,9 +258,11 @@ later, switch to [Renovate with a custom regex manager](https://docs.renovatebot
 
 ### Upstream-canary: nightly mssql-extension smoke test
 
-`.github/workflows/nightly-mssql-ext.yml` runs once a day against
-**literal upstream HEAD** of
+`.github/workflows/nightly-mssql-ext.yml` is a **manual-trigger** check
+against **literal upstream HEAD** of
 [hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension).
+Run it via the Actions UI or
+`gh workflow run nightly-mssql-ext.yml --ref main`.
 It downloads both the `duckdb-cli-linux_amd64` and the
 `mssql-extension-linux_amd64` artifacts from the same upstream CI run
 — they're ABI-matched by construction, both built against the same
@@ -283,19 +285,22 @@ dbt-duckdb (those are tested by the regular `end-to-end
 This job is **not** a required check. A red badge means "upstream HEAD
 changed something we depend on"; not "this PR is broken."
 
-### Weekly leak check
+### Leak check (manual)
 
 `.github/workflows/nightly-mssql-leak-check.yml` exercises the same
 upstream-HEAD `duckdb-cli + mssql extension` pair under
-[`valgrind --tool=memcheck --leak-check=full`](https://valgrind.org/docs/manual/mc-manual.html),
+[`valgrind --tool=memcheck --leak-check=full`](https://valgrind.org/docs/manual/mc-manual.html).
+Also manual-trigger only:
+`gh workflow run nightly-mssql-leak-check.yml --ref main`.
 but instead of running the canary's six-table copy once, it loops the
 **`ATTACH` → `DETACH`** cycle `LEAK_ITERATIONS` times (default **10**,
 giving 20 TLS handshakes per run) to amplify any per-connection leak
 above the steady-state OpenSSL/TLS init noise. Empirically each
 src+dst iteration takes ~5 min under valgrind (the TLS handshake
 dominates and is expensive under memcheck), so 10 iters fits the
-60-minute job budget. Override `LEAK_ITERATIONS` via repository
-variable if a specific regression needs more amplification. Cadence is weekly (Mondays 05:00 UTC) — valgrind adds a
+60-minute job budget. Override via repository variable
+(`gh variable set LEAK_ITERATIONS --body 25`) if a specific regression
+needs more amplification. Cadence is weekly (Mondays 05:00 UTC) — valgrind adds a
 minute or two and leak trends move slowly, so daily would mostly burn
 minutes. Override the iteration count by setting the
 [`LEAK_ITERATIONS` repository variable](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows).
