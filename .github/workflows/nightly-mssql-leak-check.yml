@@ -205,6 +205,7 @@ jobs:
           path: |
             valgrind/memcheck.log
             valgrind/duckdb-stdout.log
+            valgrind/smoke.sql
           retention-days: 30
           if-no-files-found: warn
 
