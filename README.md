@@ -3,6 +3,7 @@
 [![CI](https://github.com/oluies/dbtex007/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oluies/dbtex007/actions/workflows/ci.yml?query=branch%3Amain)
 [![nightly · mssql ext canary](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-ext.yml/badge.svg)](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-ext.yml)
 [![nightly · mssql ext leak check](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-leak-check.yml/badge.svg)](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-leak-check.yml)
+[![dbt-autofix audit](https://github.com/oluies/dbtex007/actions/workflows/dbt-autofix-audit.yml/badge.svg)](https://github.com/oluies/dbtex007/actions/workflows/dbt-autofix-audit.yml)
 [![dbt-duckdb](https://img.shields.io/badge/dbt--duckdb-%E2%89%A51.10.1-FF694B?logo=dbt&logoColor=white)](https://github.com/duckdb/dbt-duckdb)
 [![DuckDB](https://img.shields.io/badge/DuckDB-%E2%89%A51.5.2-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org)
 [![mssql extension](https://img.shields.io/badge/mssql%20extension-hugr--lab-181717?logo=github&logoColor=white)](https://github.com/hugr-lab/mssql-extension)
@@ -284,6 +285,24 @@ dbt-duckdb (those are tested by the regular `end-to-end
 
 This job is **not** a required check. A red badge means "upstream HEAD
 changed something we depend on"; not "this PR is broken."
+
+### dbt-autofix deprecation audit
+
+`.github/workflows/dbt-autofix-audit.yml` runs
+`uvx dbt-autofix deprecations --dry-run` against both projects on any
+PR that touches `projects/*/dbt_project.yml`, models, macros, or
+`requirements.txt`. Output goes into the GitHub run summary plus a
+30-day-retention artifact. The job never fails on findings — it's
+informational, reviewers decide whether to apply the suggestions.
+
+Some suggestions are intentionally not applied (see the inline comment
+in `projects/dbt_duckdb_mssql/dbt_project.yml`): autofix's
+"unrecognized config" heuristic doesn't understand custom
+materialization config schemas, so it would silently move
+`+target_mssql_schema` / `+strategy` under `+meta` and break the
+typed-override interface.
+
+Manual run: `gh workflow run dbt-autofix-audit.yml --ref main`.
 
 ### Leak check (manual)
 
