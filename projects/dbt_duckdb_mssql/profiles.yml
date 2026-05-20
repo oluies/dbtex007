@@ -10,11 +10,6 @@ dbt_duckdb_mssql:
       # wrapping interferes with how the extension manages its TDS session.
       # Disabling lets the extension commit naturally per statement.
       disable_transactions: true
-      # Required when the nightly-canary CI job side-loads an unsigned
-      # build of the mssql extension from hugr-lab's CI artifacts.
-      # Harmless for signed community-released builds.
-      config_options:
-        allow_unsigned_extensions: true
       # Memory controls — see https://duckdb.org/docs/current/guides/performance/oom
       # The mssql extension streams rows from SQL Server into DuckDB before
       # pushing them back out; without a limit DuckDB will grab 80% of RAM

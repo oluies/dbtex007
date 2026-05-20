@@ -251,30 +251,32 @@ There is no Dependabot ecosystem for dbt's `packages.yml` — neither
 project uses dbt-hub packages today, so it's a non-issue. If you add any
 later, switch to [Renovate with a custom regex manager](https://docs.renovatebot.com/modules/manager/regex/).
 
-### Upstream-canary: nightly mssql-extension build
+### Upstream-canary: nightly mssql-extension smoke test
 
-`.github/workflows/nightly-mssql-ext.yml` runs the `dbt_duckdb_mssql`
-end-to-end suite once a day against the **latest tagged release** of
-[hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension),
-side-loading the binary via the `MSSQL_EXT_LOCAL_PATH` env var (the
-materialization branches to `LOAD '<path>'` instead of
-`INSTALL ... FROM community`). The upstream tag is reported in the run
-summary.
+`.github/workflows/nightly-mssql-ext.yml` runs once a day against
+**literal upstream HEAD** of
+[hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension).
+It downloads both the `duckdb-cli-linux_amd64` and the
+`mssql-extension-linux_amd64` artifacts from the same upstream CI run
+— they're ABI-matched by construction, both built against the same
+DuckDB dev SHA — and runs a smoke SQL through that bundled duckdb-cli
+against our compose containers. The upstream commit is reported in the
+run summary.
 
-Why "latest tagged release" and not literal upstream HEAD? DuckDB
-extensions are ABI-pinned to the exact DuckDB SHA they were built
-against. Upstream CI artifacts target DuckDB's dev branch — they can't
-load into our released DuckDB. Tagged releases declare the DuckDB
-version they target, so they load cleanly. The DuckDB
-community-extensions repo lags upstream releases by several days, so
-this canary catches a tag-but-not-yet-published regression before it
-reaches everyone via `INSTALL ... FROM community`.
+Why bundled cli + extension rather than side-loading into our DuckDB?
+DuckDB extensions are ABI-pinned to the exact DuckDB SHA they were
+built against. Upstream HEAD artifacts target DuckDB dev branch and
+can't load into our released DuckDB. Taking *both* binaries from the
+same upstream run sidesteps the ABI lock.
 
-This job is **not** a required check. A red badge means "upstream's
-latest release breaks our integration before it hits community"; not
-"this PR is broken." The canary also fires on PRs that touch the
-materialization or the workflow itself so changes to the side-loading
-mechanism get verified before merging.
+What it catches: TDS-protocol regressions, `ATTACH` semantics, type
+mapping, `CREATE OR REPLACE TABLE` across the attach boundary at
+upstream HEAD. What it does not catch: regressions specific to dbt or
+dbt-duckdb (those are tested by the regular `end-to-end
+(dbt_duckdb_mssql)` job against the community-released extension).
+
+This job is **not** a required check. A red badge means "upstream HEAD
+changed something we depend on"; not "this PR is broken."
 
 ## What's out of scope
 

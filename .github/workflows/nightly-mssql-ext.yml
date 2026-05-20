@@ -1,24 +1,18 @@
 name: nightly · mssql ext canary
 
-# Runs the dbt_duckdb_mssql end-to-end suite against the **latest tagged
-# release** of hugr-lab/mssql-extension — *before* that tag is picked up
-# by the DuckDB community-extensions repo (typically a several-day lag).
-# Catches regressions in a release that `INSTALL mssql FROM community`
-# is about to start serving to everyone.
+# Smoke-tests the upstream hugr-lab/mssql-extension at literal HEAD by
+# downloading BOTH the duckdb-cli AND the mssql extension binaries from
+# the same upstream CI run (they're ABI-matched by construction — built
+# together against DuckDB dev branch) and running our copy SQL through
+# that bundled duckdb-cli against our compose containers.
 #
-# Why not literal upstream HEAD? DuckDB extensions are ABI-pinned to the
-# exact DuckDB SHA they were built against. Upstream CI artifacts are
-# built against DuckDB's dev branch (some commit SHA), which won't load
-# into a released DuckDB. Tagged releases declare the DuckDB version
-# they target (see release notes), so they're loadable. Building from
-# source against our pinned DuckDB would let us test literal HEAD but
-# adds ~10 min of CMake build time.
+# What it catches: TDS-protocol regressions, ATTACH semantics, type
+# mapping, CREATE OR REPLACE TABLE across the attach boundary.
 #
-# Triggers:
-# - daily at 04:00 UTC
-# - manual via the Actions tab
-# - on PRs that touch the materialization or this workflow itself, so
-#   changes to the side-loading mechanism are verified before merging
+# What it does NOT catch: regressions specific to our dbt materialization
+# (because we bypass dbt and dbt-duckdb here). The regular
+# `end-to-end (dbt_duckdb_mssql)` job in ci.yml covers that path against
+# the community-released extension.
 on:
   schedule:
     - cron: "0 4 * * *"
@@ -26,8 +20,6 @@ on:
   pull_request:
     paths:
       - ".github/workflows/nightly-mssql-ext.yml"
-      - "projects/dbt_duckdb_mssql/macros/materialization_mssql_native.sql"
-      - "projects/dbt_duckdb_mssql/profiles.yml"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,23 +32,11 @@ permissions:
 
 jobs:
   canary:
-    # NOT marked as required in branch protection. Failures here are
-    # informational — they indicate the upstream extension's latest
-    # release breaks our integration before it reaches `INSTALL ... FROM community`.
-    name: end-to-end (dbt_duckdb_mssql · latest upstream release)
+    name: smoke (upstream HEAD · duckdb-cli + mssql extension)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-          cache-dependency-glob: projects/dbt_duckdb_mssql/requirements.txt
 
       - name: Materialize .env and export into job env
         run: |
@@ -70,40 +50,50 @@ jobs:
             printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
           done < .env
 
-      - name: Resolve and download latest hugr-lab mssql-extension release
+      - name: Download upstream duckdb-cli + extension (same CI run)
         id: ext
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/mssql-ext
-          # Latest non-prerelease tag on hugr-lab/mssql-extension. Excludes the
-          # asset-less v0.1.0 placeholder and any draft/prerelease entries.
-          read -r tag release_url < <(
-            gh api 'repos/hugr-lab/mssql-extension/releases?per_page=20' \
-              --jq '[.[] | select(.draft == false and .prerelease == false and (.assets | length) > 0)] | .[0] | "\(.tag_name) \(.html_url)"'
+          mkdir -p /tmp/upstream
+          # Latest successful CI run on hugr-lab/mssql-extension main.
+          # Take BOTH artifacts from this single run so the duckdb-cli
+          # and the .duckdb_extension are ABI-matched by construction
+          # (released DuckDB can't load these — they target DuckDB HEAD).
+          read -r run_id run_sha run_url < <(
+            gh api 'repos/hugr-lab/mssql-extension/actions/runs?branch=main&status=success&per_page=20' \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | .[0] | "\(.id) \(.head_sha[0:7]) \(.html_url)"'
           )
-          echo "Resolving release: $tag ($release_url)"
-          gh release download "$tag" --repo hugr-lab/mssql-extension \
-            --pattern '*-linux_amd64.duckdb_extension' --dir /tmp/mssql-ext
-          ext_path=$(find /tmp/mssql-ext -name '*-linux_amd64.duckdb_extension' -print -quit)
-          if [[ -z "$ext_path" ]]; then
-            echo "::error::No linux_amd64 .duckdb_extension asset on $tag"
-            ls -la /tmp/mssql-ext
-            exit 1
-          fi
-          echo "MSSQL_EXT_LOCAL_PATH=$ext_path" >> "$GITHUB_ENV"
-          echo "upstream_tag=$tag"           >> "$GITHUB_OUTPUT"
-          echo "upstream_release_url=$release_url" >> "$GITHUB_OUTPUT"
+          echo "Upstream CI run: $run_url (sha $run_sha)"
+          gh run download "$run_id" --repo hugr-lab/mssql-extension \
+            --name duckdb-cli-linux_amd64       --dir /tmp/upstream/duckdb-cli
+          gh run download "$run_id" --repo hugr-lab/mssql-extension \
+            --name mssql-extension-linux_amd64  --dir /tmp/upstream/ext
+
+          duckdb_bin=$(find /tmp/upstream/duckdb-cli -type f -name 'duckdb' -print -quit)
+          ext_path=$(find /tmp/upstream/ext -name '*.duckdb_extension' -print -quit)
+          [[ -z "$duckdb_bin" ]] && { echo "::error::no duckdb cli in artifact"; ls -lR /tmp/upstream; exit 1; }
+          [[ -z "$ext_path"   ]] && { echo "::error::no .duckdb_extension in artifact"; ls -lR /tmp/upstream; exit 1; }
+          chmod +x "$duckdb_bin"
+
+          # Confirm the duckdb-cli came up and report its version banner;
+          # this is also a sanity check that the binary runs at all.
+          duckdb_version=$("$duckdb_bin" -version)
+          echo "Upstream duckdb-cli: $duckdb_version"
+
+          echo "DUCKDB_BIN=$duckdb_bin"          >> "$GITHUB_ENV"
+          echo "MSSQL_EXT_PATH=$ext_path"        >> "$GITHUB_ENV"
+          echo "upstream_sha=$run_sha"           >> "$GITHUB_OUTPUT"
+          echo "upstream_run_url=$run_url"       >> "$GITHUB_OUTPUT"
           {
             echo "### Canary build under test"
             echo "- Upstream repo: [hugr-lab/mssql-extension](https://github.com/hugr-lab/mssql-extension)"
-            echo "- Upstream release: [\`$tag\`]($release_url)"
-            echo "- Local binary: \`$ext_path\`"
+            echo "- Upstream commit: \`$run_sha\`"
+            echo "- Upstream CI run: $run_url"
+            echo "- duckdb-cli: \`$duckdb_version\`"
+            echo "- Extension: \`$ext_path\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Install Python deps for dbt_duckdb_mssql
-        run: uv pip install --system -r projects/dbt_duckdb_mssql/requirements.txt
 
       - name: Start SQL Server containers
         run: docker compose up -d --wait
@@ -128,11 +118,25 @@ jobs:
           docker compose logs mssql-source | tail -100
           exit 1
 
-      - name: Run dbt project against latest release
-        env:
-          DBT_PROFILES_DIR: "."
-        working-directory: projects/dbt_duckdb_mssql
-        run: dbt run
+      - name: Smoke SQL via upstream duckdb-cli
+        # Mirrors the materialization's hot path: LOAD extension, ATTACH
+        # both DBs, CREATE OR REPLACE TABLE across the boundary, count.
+        # Runs against the DDD tables our regular suite uses so any
+        # type-mapping / TDS regression surfaces here.
+        run: |
+          set -euo pipefail
+          "$DUCKDB_BIN" :memory: <<SQL
+          SET allow_unsigned_extensions = true;
+          LOAD '${MSSQL_EXT_PATH}';
+          ATTACH '${SRC_MSSQL_DUCKDB_CONN}' AS src (TYPE mssql, READ_ONLY);
+          ATTACH '${DST_MSSQL_DUCKDB_CONN}' AS dst (TYPE mssql);
+          CREATE OR REPLACE TABLE dst.ddd.locations       AS SELECT * FROM src.ddd.locations;
+          CREATE OR REPLACE TABLE dst.ddd.voyages         AS SELECT * FROM src.ddd.voyages;
+          CREATE OR REPLACE TABLE dst.ddd.cargo           AS SELECT * FROM src.ddd.cargo;
+          CREATE OR REPLACE TABLE dst.ddd.itinerary       AS SELECT * FROM src.ddd.itinerary;
+          CREATE OR REPLACE TABLE dst.ddd.legs            AS SELECT * FROM src.ddd.legs;
+          CREATE OR REPLACE TABLE dst.ddd.handling_events AS SELECT * FROM src.ddd.handling_events;
+          SQL
 
       - name: Assert dest row counts match source
         run: |
@@ -147,7 +151,7 @@ jobs:
               -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_dest -h-1 -W \
               -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.$t" | tr -d '[:space:]')
             if [[ "$src" != "$dst" ]]; then
-              echo "::error::$t: src=$src dst=$dst (mismatch — upstream release ${UPSTREAM_TAG} may have regressed)"
+              echo "::error::$t: src=$src dst=$dst (mismatch — upstream sha ${UPSTREAM_SHA} may have regressed)"
               fail=1
             else
               echo "  $t: $src rows (ok)"
@@ -155,7 +159,7 @@ jobs:
           done
           exit $fail
         env:
-          UPSTREAM_TAG: ${{ steps.ext.outputs.upstream_tag }}
+          UPSTREAM_SHA: ${{ steps.ext.outputs.upstream_sha }}
 
       - name: Dump container logs on failure
         if: failure()

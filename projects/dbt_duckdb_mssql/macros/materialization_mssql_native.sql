@@ -39,19 +39,8 @@
 
     {%- set fqn = dst_alias ~ '.' ~ target_schema ~ '.' ~ target_table -%}
 
-    {# If MSSQL_EXT_LOCAL_PATH is set, side-load that file instead of
-       fetching from the community repository. Used by the nightly
-       canary job to test against unreleased hugr-lab builds. The
-       binary is unsigned so the connection-level
-       allow_unsigned_extensions setting in profiles.yml must be true
-       (it's set there unconditionally — harmless for signed releases). #}
-    {%- set local_ext = env_var('MSSQL_EXT_LOCAL_PATH', '') -%}
-    {%- if local_ext -%}
-        {% do run_query("LOAD '" ~ local_ext ~ "'") %}
-    {%- else -%}
-        {% do run_query("INSTALL mssql FROM community") %}
-        {% do run_query("LOAD mssql") %}
-    {%- endif %}
+    {% do run_query("INSTALL mssql FROM community") %}
+    {% do run_query("LOAD mssql") %}
 
     {% do run_query(
         "ATTACH IF NOT EXISTS '" ~ src_conn ~ "' AS " ~ src_alias ~ " (TYPE mssql, READ_ONLY)"
