@@ -139,8 +139,12 @@ jobs:
               printf -- '-- iter %d / %s\n' "$i" "${LEAK_ITERATIONS}"
               printf "ATTACH '%s' AS src (TYPE mssql, READ_ONLY);\n" "${SRC_MSSQL_DUCKDB_CONN}"
               printf "ATTACH '%s' AS dst (TYPE mssql);\n"            "${DST_MSSQL_DUCKDB_CONN}"
-              printf 'SELECT 1 FROM src.ddd.locations LIMIT 1;\n'
-              printf 'SELECT 1 FROM dst.information_schema.schemata LIMIT 1;\n'
+              # Probes that force a TDS round-trip on each catalog.
+              # sys.tables exists in every SQL Server database (even an
+              # empty one); information_schema is not exposed through
+              # the mssql extension's attached-catalog namespace.
+              printf 'SELECT 1 FROM src.sys.tables LIMIT 1;\n'
+              printf 'SELECT 1 FROM dst.sys.tables LIMIT 1;\n'
               printf 'DETACH src;\n'
               printf 'DETACH dst;\n'
             done
