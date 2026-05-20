@@ -50,6 +50,10 @@ sample (per [oluies/ddd-sample-scala](https://github.com/oluies/ddd-sample-scala
   emulation. Slow first start but works. See **ARM Macs** below for the
   faster `azure-sql-edge` alternative.
 - Python 3.10+ on the host (used by both dbt projects).
+- [`uv`](https://github.com/astral-sh/uv) for venv + package management
+  (`brew install uv` on macOS, `curl -LsSf https://astral.sh/uv/install.sh | sh`
+  on Linux). The Makefile uses uv exclusively — pip is not required and
+  not invoked.
 - `make`.
 
 ## Quick start
