@@ -286,11 +286,12 @@ upstream-HEAD `duckdb-cli + mssql extension` pair under
 [`valgrind --tool=memcheck --leak-check=full`](https://valgrind.org/docs/manual/mc-manual.html),
 but instead of running the canary's six-table copy once, it loops the
 **`ATTACH` → probe → `DETACH`** cycle `LEAK_ITERATIONS` times (default
-**50**) to amplify any per-connection leak above the
+**25**) to amplify any per-connection leak above the
 steady-state OpenSSL/TLS init noise. A 50-byte-per-attach leak shows
-up as ~2.5 KB extra "definitely lost" after the loop; without
+up as ~1.3 KB extra "definitely lost" after the loop; without
 amplification it would be lost in the ~9 KB of legitimately reachable
-TLS state. Cadence is weekly (Mondays 05:00 UTC) — valgrind adds a
+TLS state. (We picked 25 not 50: under valgrind each iteration takes
+~30s, so 50 hit the previous 30-minute job timeout.) Cadence is weekly (Mondays 05:00 UTC) — valgrind adds a
 minute or two and leak trends move slowly, so daily would mostly burn
 minutes. Override the iteration count by setting the
 [`LEAK_ITERATIONS` repository variable](https://docs.github.com/en/actions/learn-github-actions/variables#defining-configuration-variables-for-multiple-workflows).

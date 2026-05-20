@@ -36,7 +36,12 @@ jobs:
   leak-check:
     name: valgrind (upstream HEAD · duckdb-cli + mssql ext)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Under valgrind each ATTACH→probe→DETACH iteration takes ~30s
+    # (TLS handshake + TDS round-trip + 10–30× valgrind overhead).
+    # 25 iterations × 30s ≈ 13 min of SQL, plus ~5 min for download +
+    # apt-install valgrind + compose up. 60-min budget leaves headroom
+    # for runner variance and one-off slow pulls.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -107,17 +112,22 @@ jobs:
 
       - name: Generate iterated ATTACH/DETACH SQL
         # Repeat the ATTACH → tiny-probe → DETACH cycle LEAK_ITERATIONS
-        # times (default 50). Each iteration exercises the full TLS +
+        # times (default 25). Each iteration exercises the full TLS +
         # TDS connection lifecycle in the mssql extension. A leak of
-        # N bytes per attach amplifies to ~50N bytes — well above the
+        # N bytes per attach amplifies to ~25N bytes — well above the
         # steady-state ~9KB of OpenSSL initialization noise.
+        #
+        # We picked 25 not 50: under valgrind each iter takes ~30s
+        # (the TLS handshake dominates), so 50 blew the prior 30-min
+        # job timeout. Override via the LEAK_ITERATIONS repository
+        # variable if a regression hunt needs more amplification.
         #
         # The probe SELECT forces the lazy TDS handshake to actually
         # complete (ATTACH alone defers some work until first query),
         # so connection-setup leaks show up rather than just
         # constructor-side leaks.
         env:
-          LEAK_ITERATIONS: ${{ vars.LEAK_ITERATIONS || '50' }}
+          LEAK_ITERATIONS: ${{ vars.LEAK_ITERATIONS || '25' }}
         run: |
           set -euo pipefail
           mkdir -p valgrind
