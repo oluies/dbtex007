@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/oluies/dbtex007/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/oluies/dbtex007/actions/workflows/ci.yml?query=branch%3Amain)
 [![nightly · mssql ext canary](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-ext.yml/badge.svg)](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-ext.yml)
+[![nightly · mssql ext leak check](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-leak-check.yml/badge.svg)](https://github.com/oluies/dbtex007/actions/workflows/nightly-mssql-leak-check.yml)
 [![dbt-duckdb](https://img.shields.io/badge/dbt--duckdb-%E2%89%A51.10.1-FF694B?logo=dbt&logoColor=white)](https://github.com/duckdb/dbt-duckdb)
 [![DuckDB](https://img.shields.io/badge/DuckDB-%E2%89%A51.5.2-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org)
 [![mssql extension](https://img.shields.io/badge/mssql%20extension-hugr--lab-181717?logo=github&logoColor=white)](https://github.com/hugr-lab/mssql-extension)
@@ -277,6 +278,29 @@ dbt-duckdb (those are tested by the regular `end-to-end
 
 This job is **not** a required check. A red badge means "upstream HEAD
 changed something we depend on"; not "this PR is broken."
+
+### Weekly leak check
+
+`.github/workflows/nightly-mssql-leak-check.yml` runs the same smoke
+SQL through the same upstream-HEAD `duckdb-cli + mssql extension`
+pair but under [`valgrind --tool=memcheck --leak-check=full`](https://valgrind.org/docs/manual/mc-manual.html).
+Cadence is weekly (Mondays 05:00 UTC) — valgrind adds 30–60s per run
+and leak trends move slowly, so daily would mostly burn minutes.
+
+What the workflow produces:
+
+- A `HEAP / ERROR SUMMARY` block in the GitHub job summary, visible on
+  the run page without downloading anything.
+- A `valgrind-memcheck-<run_id>` workflow artifact containing the full
+  `memcheck.log` and the captured `duckdb-cli` stdout, retained for
+  **30 days** (own retention, separate from the daily canary).
+
+`--error-exitcode=0` keeps the workflow green as long as the
+*infrastructure* ran. Read "definitely lost" / "indirectly lost" as
+the regression signal; "still reachable" is largely DuckDB's
+intentional process-lifetime arenas and is not a bug.
+
+The leak-check job is also **not** a required check.
 
 ## What's out of scope
 

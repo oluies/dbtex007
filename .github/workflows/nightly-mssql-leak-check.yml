@@ -1,0 +1,191 @@
+name: nightly · mssql ext leak check
+
+# Runs Valgrind memcheck against upstream HEAD's duckdb-cli + mssql
+# extension while it copies our DDD tables across the ATTACH boundary.
+# Same artifact pair as the daily smoke canary (ABI-matched by
+# construction), but executed under valgrind --leak-check=full so we
+# get a leak summary per allocation site.
+#
+# The job stays green as long as the *infrastructure* ran — the leak
+# numbers themselves are informational, surfaced via the job summary
+# and the uploaded log artifact. DuckDB intentionally retains some
+# allocations until process exit, so "still reachable" bytes are not
+# bugs; watch "definitely lost" / "indirectly lost" for regressions.
+#
+# Weekly cadence (Mondays 05:00 UTC) rather than daily — valgrind adds
+# 30–60s per run and leak trends move slowly. Daily would mostly burn
+# minutes for redundant data.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/nightly-mssql-leak-check.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  leak-check:
+    name: valgrind (upstream HEAD · duckdb-cli + mssql ext)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -yq --no-install-recommends valgrind
+          valgrind --version
+
+      - name: Materialize .env and export into job env
+        run: |
+          cp .env.example .env
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            val="${val#\'}"; val="${val%\'}"
+            val="${val#\"}"; val="${val%\"}"
+            printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
+          done < .env
+
+      - name: Download upstream duckdb-cli + extension (same CI run)
+        id: ext
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/upstream
+          read -r run_id run_sha run_url < <(
+            gh api 'repos/hugr-lab/mssql-extension/actions/runs?branch=main&status=success&per_page=20' \
+              --jq '[.workflow_runs[] | select(.name == "CI")] | .[0] | "\(.id) \(.head_sha[0:7]) \(.html_url)"'
+          )
+          echo "Upstream CI run: $run_url (sha $run_sha)"
+          gh run download "$run_id" --repo hugr-lab/mssql-extension \
+            --name duckdb-cli-linux_amd64      --dir /tmp/upstream/duckdb-cli
+          gh run download "$run_id" --repo hugr-lab/mssql-extension \
+            --name mssql-extension-linux_amd64 --dir /tmp/upstream/ext
+          duckdb_bin=$(find /tmp/upstream/duckdb-cli -type f -name 'duckdb' -print -quit)
+          ext_path=$(find /tmp/upstream/ext -name '*.duckdb_extension' -print -quit)
+          chmod +x "$duckdb_bin"
+          echo "DUCKDB_BIN=$duckdb_bin"      >> "$GITHUB_ENV"
+          echo "MSSQL_EXT_PATH=$ext_path"    >> "$GITHUB_ENV"
+          echo "upstream_sha=$run_sha"       >> "$GITHUB_OUTPUT"
+          echo "upstream_run_url=$run_url"   >> "$GITHUB_OUTPUT"
+
+      - name: Start SQL Server containers
+        run: docker compose up -d --wait
+
+      - name: Wait for source seed to complete
+        run: |
+          set -euo pipefail
+          for i in {1..30}; do
+            count=$(docker exec ddd-mssql-source /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -No -d ddd_source -h-1 -W \
+              -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM ddd.locations" 2>/dev/null \
+              | tr -d '[:space:]' || true)
+            count="${count:-0}"
+            if [[ "$count" == "10" ]]; then
+              echo "Source seeded ($count locations)."
+              exit 0
+            fi
+            echo "  attempt $i: locations=$count, waiting..."
+            sleep 2
+          done
+          echo "::error::Source seed did not complete in time"
+          docker compose logs mssql-source | tail -100
+          exit 1
+
+      - name: Run smoke SQL under valgrind
+        # --error-exitcode=0 keeps valgrind from propagating findings as
+        # a non-zero exit; we surface the report via summary/artifact.
+        # |& tee captures both streams for diagnostics if duckdb itself
+        # crashes (would not appear in --log-file).
+        run: |
+          set -uo pipefail
+          mkdir -p valgrind
+          valgrind \
+            --tool=memcheck \
+            --leak-check=full \
+            --show-leak-kinds=all \
+            --track-origins=yes \
+            --num-callers=30 \
+            --error-exitcode=0 \
+            --log-file=valgrind/memcheck.log \
+            "$DUCKDB_BIN" -unsigned :memory: <<SQL |& tee valgrind/duckdb-stdout.log
+          LOAD '${MSSQL_EXT_PATH}';
+          ATTACH '${SRC_MSSQL_DUCKDB_CONN}' AS src (TYPE mssql, READ_ONLY);
+          ATTACH '${DST_MSSQL_DUCKDB_CONN}' AS dst (TYPE mssql);
+          CREATE OR REPLACE TABLE dst.ddd.locations       AS SELECT * FROM src.ddd.locations;
+          CREATE OR REPLACE TABLE dst.ddd.voyages         AS SELECT * FROM src.ddd.voyages;
+          CREATE OR REPLACE TABLE dst.ddd.cargo           AS SELECT * FROM src.ddd.cargo;
+          CREATE OR REPLACE TABLE dst.ddd.itinerary       AS SELECT * FROM src.ddd.itinerary;
+          CREATE OR REPLACE TABLE dst.ddd.legs            AS SELECT * FROM src.ddd.legs;
+          CREATE OR REPLACE TABLE dst.ddd.handling_events AS SELECT * FROM src.ddd.handling_events;
+          SQL
+          # The duckdb-cli's own exit code is preserved by tee — capture
+          # it from PIPESTATUS so we can complain about crashes.
+          duckdb_ec=${PIPESTATUS[0]}
+          echo "duckdb-cli exit code: $duckdb_ec"
+          if [[ -s valgrind/memcheck.log ]]; then
+            echo "Valgrind log size: $(wc -c < valgrind/memcheck.log) bytes"
+          else
+            echo "::warning::Valgrind produced no log"
+          fi
+
+      - name: Summarize leak report
+        if: always()
+        env:
+          UPSTREAM_SHA: ${{ steps.ext.outputs.upstream_sha }}
+          UPSTREAM_RUN_URL: ${{ steps.ext.outputs.upstream_run_url }}
+        run: |
+          {
+            echo "### Valgrind memcheck — upstream HEAD"
+            echo
+            echo "- Upstream commit: \`${UPSTREAM_SHA}\`"
+            echo "- Upstream CI run: ${UPSTREAM_RUN_URL}"
+            echo
+            if [[ -s valgrind/memcheck.log ]]; then
+              echo "#### HEAP / ERROR SUMMARY"
+              echo
+              echo '```'
+              # Grab the standard valgrind summary tail: HEAP SUMMARY,
+              # LEAK SUMMARY, ERROR SUMMARY blocks.
+              awk '
+                /HEAP SUMMARY:/ { in_block=1 }
+                in_block { print }
+                /ERROR SUMMARY:/ { print ""; exit }
+              ' valgrind/memcheck.log | sed -E 's/^==[0-9]+== ?//'
+              echo '```'
+              echo
+              echo "Full log: see the \`valgrind-memcheck\` workflow artifact (retained 30 days)."
+            else
+              echo "_No valgrind log produced — see the run logs for what went wrong._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload valgrind log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: valgrind-memcheck-${{ github.run_id }}
+          path: |
+            valgrind/memcheck.log
+            valgrind/duckdb-stdout.log
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          docker compose logs --tail=200 mssql-source || true
+          docker compose logs --tail=200 mssql-dest || true
