@@ -8,10 +8,10 @@ ifneq (,$(wildcard $(ENV_FILE)))
     export
 endif
 
-PYTHON ?= python3
+UV     ?= uv
 VENV   := .venv
 
-.PHONY: help up down logs reset seed-check venv install run-python run-duckdb verify clean
+.PHONY: help up down logs reset seed-check venv install run-python run-duckdb verify clean uv-check
 
 help:
 	@echo "make up           - start both SQL Server containers (source + dest)"
@@ -19,11 +19,15 @@ help:
 	@echo "make reset        - down with volumes deleted (fresh seed on next 'up')"
 	@echo "make logs         - tail container logs"
 	@echo "make seed-check   - print source row counts"
-	@echo "make venv         - create a shared Python venv at $(VENV)"
-	@echo "make install      - install Python deps for both projects"
+	@echo "make venv         - create a shared Python venv at $(VENV) via uv"
+	@echo "make install      - install Python deps for both projects via uv"
 	@echo "make run-python   - run dbt Project A (Python models via pymssql)"
 	@echo "make run-duckdb   - run dbt Project B (DuckDB mssql community extension)"
 	@echo "make verify       - compare source vs dest row counts"
+	@echo ""
+	@echo "Requires uv (https://github.com/astral-sh/uv):"
+	@echo "  macOS:  brew install uv"
+	@echo "  Linux:  curl -LsSf https://astral.sh/uv/install.sh | sh"
 
 up:
 	@test -f $(ENV_FILE) || (echo "Missing .env — copy .env.example to .env"; exit 1)
@@ -48,13 +52,19 @@ seed-check:
 	    SELECT 'legs',             COUNT(*) FROM ddd.legs UNION ALL \
 	    SELECT 'handling_events',  COUNT(*) FROM ddd.handling_events;"
 
-venv:
-	@test -d $(VENV) || $(PYTHON) -m venv $(VENV)
-	@. $(VENV)/bin/activate && pip install --upgrade pip
+uv-check:
+	@command -v $(UV) >/dev/null 2>&1 || { \
+	    echo "uv not found on PATH."; \
+	    echo "  macOS:  brew install uv"; \
+	    echo "  Linux:  curl -LsSf https://astral.sh/uv/install.sh | sh"; \
+	    exit 1; }
+
+venv: uv-check
+	@test -d $(VENV) || $(UV) venv $(VENV)
 
 install: venv
-	. $(VENV)/bin/activate && pip install -r projects/dbt_python_copy/requirements.txt
-	. $(VENV)/bin/activate && pip install -r projects/dbt_duckdb_mssql/requirements.txt
+	$(UV) pip install --python $(VENV)/bin/python -r projects/dbt_python_copy/requirements.txt
+	$(UV) pip install --python $(VENV)/bin/python -r projects/dbt_duckdb_mssql/requirements.txt
 
 run-python: install
 	. $(VENV)/bin/activate && cd projects/dbt_python_copy && \
