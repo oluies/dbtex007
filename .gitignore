@@ -12,3 +12,6 @@ logs/
 *.duckdb.tmp
 
 .DS_Store
+
+chrome/
+.claude/
