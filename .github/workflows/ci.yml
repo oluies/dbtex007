@@ -78,7 +78,7 @@ jobs:
       # near-no-op cache hit instead of a re-download every job.
       - name: Cache DuckDB extensions
         if: matrix.project == 'dbt_duckdb_mssql'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.duckdb
           key: duckdb-ext-${{ runner.os }}-mssql-v1
