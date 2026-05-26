@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload audit log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dbt-autofix-${{ matrix.project }}-${{ github.run_id }}
           path: audit/${{ matrix.project }}.log
