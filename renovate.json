@@ -1,0 +1,31 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 6am on monday"],
+  "timezone": "Europe/Stockholm",
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "Was the 'dbt' group on pip in BOTH project directories in .github/dependabot.yml (patterns dbt-*, duckdb), weekly, limit 5. Renovate does not need the directory split: one rule covers projects/dbt_python_copy and projects/dbt_duckdb_mssql, and a bump that hits both now lands in one PR instead of the two that were open as #28 and #29.",
+      "matchManagers": ["pip_requirements", "pip-compile", "pep621"],
+      "matchPackageNames": ["dbt-*", "duckdb"],
+      "groupName": "dbt"
+    },
+    {
+      "description": "Was the 'python-data' group on pip in projects/dbt_python_copy (patterns pandas, sqlalchemy, pymssql), weekly, limit 5.",
+      "matchManagers": ["pip_requirements", "pip-compile", "pep621"],
+      "matchPackageNames": ["pandas", "sqlalchemy", "pymssql"],
+      "groupName": "python-data"
+    },
+    {
+      "description": "Was the docker-compose ecosystem, weekly, limit 3.",
+      "matchManagers": ["docker-compose", "dockerfile"],
+      "groupName": "docker images"
+    },
+    {
+      "description": "Was the github-actions ecosystem, weekly, limit 3. Grouped into one PR.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ]
+}
